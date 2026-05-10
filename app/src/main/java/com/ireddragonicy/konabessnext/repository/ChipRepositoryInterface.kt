@@ -7,7 +7,6 @@ interface ChipRepositoryInterface {
     val definitions: StateFlow<List<ChipDefinition>>
     val currentChip: StateFlow<ChipDefinition?>
     
-    fun loadDefinitions()
     fun setCurrentChip(chip: ChipDefinition?)
     fun getChipById(id: String): ChipDefinition?
     fun getLevelsForCurrentChip(): IntArray

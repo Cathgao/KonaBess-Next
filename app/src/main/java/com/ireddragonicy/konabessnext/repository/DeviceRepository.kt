@@ -100,7 +100,6 @@ open class DeviceRepository @Inject constructor(
 
     override fun getActiveDtbId(partition: TargetPartition): Int = activeDtbIdByPartition[partition] ?: -1
 
-    /** Whether the app is currently in root mode. */
     val isRootMode: Boolean
         get() = shellRepository.isRootMode
 
@@ -158,31 +157,34 @@ open class DeviceRepository @Inject constructor(
     private fun saveCustomDefinition(def: ChipDefinition) {
         prefs.edit()
              .putString("custom_def_id", def.id)
+             .putString("custom_def_name", def.name)
              .putString("custom_def_strategy", def.strategyType)
              .putString("custom_def_pattern", def.voltTablePattern)
              .putInt("custom_def_max_levels", def.maxTableLevels)
+             .putInt("custom_def_level_count", def.levelCount)
              .putBoolean("custom_def_ignore_volt", def.ignoreVoltTable)
              .apply()
     }
 
-
     fun tryLoadCustomDefinition(id: String): ChipDefinition? {
         if (!id.startsWith("custom")) return null
+        val name = prefs.getString("custom_def_name", "Custom Detected Device") ?: "Custom Detected Device"
         val strategy = prefs.getString("custom_def_strategy", "MULTI_BIN") ?: "MULTI_BIN"
         val pattern = prefs.getString("custom_def_pattern", null)
-        val maxLevels = prefs.getInt("custom_def_max_levels", 11)
+        val maxLevels = prefs.getInt("custom_def_max_levels", 15)
+        val levelCount = prefs.getInt("custom_def_level_count", 480)
         val ignoreVolt = prefs.getBoolean("custom_def_ignore_volt", false)
         
         return ChipDefinition(
             id = id,
-            name = "Custom Discovered Device",
+            name = name,
             maxTableLevels = maxLevels,
             ignoreVoltTable = ignoreVolt,
             minLevelOffset = 1,
             voltTablePattern = pattern,
             strategyType = strategy,
-            levelCount = 480,
-            levelPreset = LevelPresets.inferPreset(null, 480),
+            levelCount = levelCount,
+            levelPreset = LevelPresets.inferPreset(name, levelCount),
             binDescriptions = null,
             needsCaTargetOffset = false,
             models = listOf("Custom")
@@ -206,7 +208,6 @@ open class DeviceRepository @Inject constructor(
                 )
             }
 
-            // Detect if the file is a binary DTB or text DTS/TXT
             val dtsFile = File(savedDtsDir, "${sanitizedName}_$timestamp.dts")
             val importedFile = if (isDtbBinary(rawFile)) {
                 val dtcPath = getBinaryPath("dtc")
@@ -233,12 +234,8 @@ open class DeviceRepository @Inject constructor(
                 dtsFile
             }
 
-            // Use sequential negative IDs to distinguish from physical DTBs (0..n)
             val virtualId = nextImportedVirtualId(selectedPartition)
-
             val content = importedFile.readText()
-
-            // Use DtsScanner smart detection to analyze
             val scanResult = DtsScanner.scanContent(content, virtualId)
             val def = if (scanResult.isValid) {
                 DtsScanner.toChipDefinition(scanResult)
@@ -258,17 +255,11 @@ open class DeviceRepository @Inject constructor(
             DomainResult.Success(dtb)
         } catch (e: IOException) {
             DomainResult.Failure(AppError.IoError(e.message ?: "Failed to import external DTS file.", e))
-        } catch (e: IllegalArgumentException) {
-            DomainResult.Failure(AppError.ParsingError(e.message ?: "Failed to parse imported DTS content."))
         } catch (e: Exception) {
             DomainResult.Failure(AppError.UnknownError(e.message ?: "Import failed", e))
         }
     }
 
-    /**
-     * Load all previously saved DTS files from the saved_dts directory.
-     * Called on non-root startup to restore imported files across app restarts.
-     */
     suspend fun loadSavedDts(): List<Dtb> = withContext(Dispatchers.IO) {
         savedDtsDir.mkdirs()
         val savedFiles = savedDtsDir.listFiles { _, name -> name.endsWith(".dts") }
@@ -292,9 +283,6 @@ open class DeviceRepository @Inject constructor(
         loaded
     }
 
-    /**
-     * Delete a saved/imported DTS file by its virtual ID.
-     */
     fun deleteSavedDts(virtualId: Int): Boolean {
         val path = importedPathMap()[virtualId] ?: return false
         val file = File(path)
@@ -311,9 +299,6 @@ open class DeviceRepository @Inject constructor(
         return deleted
     }
 
-    /**
-     * Detect if a file is a binary DTB by checking for the FDT magic number (0xD00DFEED).
-     */
     private fun isDtbBinary(file: File): Boolean {
         if (!file.exists() || file.length() < 4) return false
         return try {
@@ -336,7 +321,6 @@ open class DeviceRepository @Inject constructor(
     suspend fun cleanEnv() = withContext(Dispatchers.IO) {
         resetState()
         if (isRootMode) {
-            // Use root shell to delete — handles any file ownership
             shellRepository.execAndCheck(
                 "rm -f $filesDir/*.dtb",
                 "rm -f $filesDir/*.dts",
@@ -349,42 +333,25 @@ open class DeviceRepository @Inject constructor(
                 "rm -rf ${partitionRootDir.absolutePath}/*"
             )
         } else {
-            // Non-root: use cleanWorkingFiles helper (handles root-owned leftover files)
             cleanWorkingFiles()
         }
     }
 
-    /**
-     * Delete all working/intermediate files from filesDir.
-     * Handles root-owned leftover files from previous root-mode sessions.
-     * On Linux/Android, unlink() depends on parent-directory permissions, not file ownership,
-     * so the app CAN delete root-owned files from its own filesDir.
-     */
     private fun cleanWorkingFiles() {
         val dir = File(filesDir)
-        // Explicitly delete known working files
         listOf("boot.img", "boot_new.img", "dtbo.img", "dtbo_new.img", "kernel_dtb", "dtb").forEach { name ->
             val f = File(dir, name)
-            if (f.exists()) {
-                val deleted = f.delete()
-                Log.d(TAG, "cleanWorkingFiles: $name delete=${deleted}")
-            }
+            if (f.exists()) f.delete()
         }
-        // Delete all .dtb and .dts files (split/converted artifacts)
         dir.listFiles()?.forEach { file ->
             val name = file.name
             if (name.endsWith(".dtb") || name.endsWith(".dts") ||
                 name.startsWith("imported_raw_") || name.startsWith("imported_")) {
-                val deleted = file.delete()
-                Log.d(TAG, "cleanWorkingFiles: $name delete=${deleted}")
+                file.delete()
             }
         }
-
         partitionRootDir.listFiles()?.forEach { partitionDir ->
-            partitionDir.listFiles()?.forEach { file ->
-                val deleted = file.delete()
-                Log.d(TAG, "cleanWorkingFiles(partition): ${file.name} delete=$deleted")
-            }
+            partitionDir.listFiles()?.forEach { it.delete() }
         }
     }
 
@@ -404,33 +371,21 @@ open class DeviceRepository @Inject constructor(
         dtbTypeByPartition.clear()
     }
 
-    /**
-     * Get the absolute path to a bundled binary (magiskboot or dtc).
-     * In non-root mode, binaries from nativeLibraryDir are used (proper SELinux context).
-     * In root mode, binaries extracted to filesDir are used (root bypasses SELinux).
-     */
     fun getBinaryPath(name: String): String {
         val nativeLibFile = File(nativeLibDir, "lib${name}.so")
         if (nativeLibFile.exists() && nativeLibFile.canExecute()) {
             return nativeLibFile.absolutePath
         }
-        // Fallback to filesDir for root mode or if nativeLibDir doesn't have the binary
         return File(filesDir, name).absolutePath
     }
 
     suspend fun setupEnv(): DomainResult<Unit> = withContext(Dispatchers.IO) {
         try {
-            if (chipRepository.definitions.value.isEmpty()) {
-                chipRepository.loadDefinitions()
-            }
-
-            // Prefer binaries from nativeLibraryDir (bundled via jniLibs, proper SELinux context)
             val nativeLibAvailable = REQUIRED_BINARIES.all { binary ->
                 File(nativeLibDir, "lib${binary}.so").exists()
             }
 
             if (!nativeLibAvailable) {
-                // Fallback: extract from assets (legacy path, works in root mode)
                 Log.d(TAG, "setupEnv: extracting binaries from assets")
                 for (binary in REQUIRED_BINARIES) {
                     val file = File(filesDir, binary)
@@ -449,17 +404,12 @@ open class DeviceRepository @Inject constructor(
                 }
             }
             DomainResult.Success(Unit)
-        } catch (e: IOException) {
-            DomainResult.Failure(AppError.IoError(e.message ?: "Failed to initialize working environment.", e))
         } catch (e: Exception) {
             DomainResult.Failure(AppError.UnknownError(e.message ?: "Environment setup failed.", e))
         }
     }
 
     private fun exportResource(src: String, outPath: String) {
-        // Simple export since we know binaries are single files in root or specific paths
-        // If directory support is needed, we can implement strict recursive logic,
-        // but for now, we only use this for binaries which are files.
         try {
             assetDataSource.open(src).use { input ->
                 FileOutputStream(File(outPath)).use { output ->
@@ -514,20 +464,14 @@ open class DeviceRepository @Inject constructor(
             "cat /sys/class/kgsl/kgsl-3d0/devfreq/available_frequencies",
             "cat /sys/devices/platform/soc/*.qcom,kgsl-3d0/kgsl/kgsl-3d0/frequencies",
             "cat /sys/devices/platform/soc/*.qcom,kgsl-3d0/kgsl/kgsl-3d0/available_frequencies",
-            "cat /sys/devices/platform/soc/*.qcom,kgsl-3d0/kgsl/kgsl-3d0/devfreq/available_frequencies",
             "cat /sys/devices/platform/soc@0/*.qcom,kgsl-3d0/kgsl/kgsl-3d0/frequencies",
-            "cat /sys/devices/platform/soc@0/*.qcom,kgsl-3d0/kgsl/kgsl-3d0/available_frequencies",
-            "cat /sys/devices/platform/soc@0/*.qcom,kgsl-3d0/kgsl/kgsl-3d0/devfreq/available_frequencies",
-            "cat /sys/devices/platform/*.qcom,kgsl-3d0/kgsl/kgsl-3d0/frequencies",
-            "cat /sys/devices/platform/*.qcom,kgsl-3d0/kgsl/kgsl-3d0/available_frequencies",
-            "cat /sys/devices/platform/*.qcom,kgsl-3d0/kgsl/kgsl-3d0/devfreq/available_frequencies"
+            "cat /sys/devices/platform/*.qcom,kgsl-3d0/kgsl/kgsl-3d0/frequencies"
         )
 
         for (command in probeCommands) {
             val output = try {
                 shellRepository.execForOutput(command)
             } catch (securityException: SecurityException) {
-                Log.w(TAG, "GPU runtime frequency probe blocked: $command", securityException)
                 continue
             } catch (_: Exception) {
                 continue
@@ -539,13 +483,11 @@ open class DeviceRepository @Inject constructor(
             }
         }
 
-        DomainResult.Failure(AppError.IoError("Could not determine runtime GPU frequencies. This is normal on some devices or if root is denied."))
+        DomainResult.Failure(AppError.IoError("Could not determine runtime GPU frequencies."))
     }
 
     fun chooseTarget(dtb: Dtb) {
         setSelectedPartitionInternal(dtb.partition)
-        // Imported DTBs have negative IDs and their files are NOT at {id}.dts.
-        // Look up the actual path from the import registry.
         val importedPath = importedPathMap(dtb.partition)[dtb.id]
         _dtsPath = importedPath ?: File(partitionDir(dtb.partition), "${dtb.id}.dts").absolutePath
         chipRepository.setCurrentChip(dtb.type)
@@ -595,10 +537,6 @@ open class DeviceRepository @Inject constructor(
         DomainResult.Success(Unit)
     }
 
-    /**
-     * Import a boot image from an InputStream (non-root mode).
-     * Copies the stream content to filesDir/boot.img for processing.
-     */
     suspend fun importBootImage(inputStream: InputStream, filename: String): DomainResult<Unit> = withContext(Dispatchers.IO) {
         val partition = when {
             filename.contains("dtbo", ignoreCase = true) -> TargetPartition.DTBO
@@ -618,15 +556,12 @@ open class DeviceRepository @Inject constructor(
         filename: String
     ): DomainResult<Unit> = withContext(Dispatchers.IO) {
         try {
-            // Clean up ALL working artifacts first — old files may be root-owned
-            // from a previous root-mode session and can't be overwritten directly.
             val partitionWorkspace = partitionDir(partition)
             partitionWorkspace.listFiles()?.forEach { it.delete() }
 
             val bootImgFile = File(partitionWorkspace, partition.imageFileName)
             FileOutputStream(bootImgFile).use { output ->
-                val bytesCopied = inputStream.copyTo(output)
-                Log.d(TAG, "importImageForPartition: copied $bytesCopied bytes from $filename (${partition.partitionName})")
+                inputStream.copyTo(output)
             }
             if (!bootImgFile.exists() || bootImgFile.length() == 0L) {
                 return@withContext DomainResult.Failure(
@@ -640,18 +575,12 @@ open class DeviceRepository @Inject constructor(
             dtbNumByPartition.remove(partition)
             dtbTypeByPartition.remove(partition)
 
-            Log.d(TAG, "importImageForPartition: ${bootImgFile.length()} bytes, partition=${partition.partitionName}")
             DomainResult.Success(Unit)
-        } catch (e: IOException) {
-            DomainResult.Failure(AppError.IoError(e.message ?: "Failed to import ${partition.partitionName} image.", e))
         } catch (e: Exception) {
             DomainResult.Failure(AppError.UnknownError(e.message ?: "Failed to import ${partition.partitionName} image.", e))
         }
     }
 
-    /**
-     * Export the repacked boot image to an output stream (non-root mode).
-     */
     suspend fun exportRepackedImage(outputStream: OutputStream) = withContext(Dispatchers.IO) {
         val repackedFile = File(partitionDir(selectedPartition), selectedPartition.outputFileName)
         if (!repackedFile.exists() || repackedFile.length() == 0L) {
@@ -731,8 +660,6 @@ open class DeviceRepository @Inject constructor(
             }
 
             DomainResult.Success(Unit)
-        } catch (e: IOException) {
-            DomainResult.Failure(AppError.IoError(e.message ?: "Failed to write boot image.", e))
         } catch (e: Exception) {
             DomainResult.Failure(AppError.UnknownError(e.message ?: "Failed to write boot image.", e))
         }
@@ -813,8 +740,6 @@ open class DeviceRepository @Inject constructor(
 
             sb.append("Successfully installed to inactive slot ($targetSlot).")
             DomainResult.Success(sb.toString())
-        } catch (e: IOException) {
-            DomainResult.Failure(AppError.IoError(e.message ?: "Failed to install image to inactive slot.", e))
         } catch (e: Exception) {
             DomainResult.Failure(AppError.UnknownError(e.message ?: "Inactive slot install failed.", e))
         }
@@ -896,7 +821,6 @@ open class DeviceRepository @Inject constructor(
                 )
                 return@withContext DomainResult.Failure(AppError.RootAccessError())
             }
-            // setupEnv is already called by the caller (detectChipset/importBootImage)
             val partitionDtbs = dtbsByPartition.getOrPut(partition) { ArrayList() }
             partitionDtbs.clear()
             if (isRootMode) {
@@ -939,30 +863,17 @@ open class DeviceRepository @Inject constructor(
                         }
                     }
 
-                    val chipId = detectChipType(content)
-                    val def = if (chipId != null) {
-                        // Found in hardcoded definitions
-                        chipRepository.getChipById(chipId) ?: createGenericPlaceholder(i, content, dtsModel)
-                    } else {
-                        // Not in definitions.json → use smart detection
-                        Log.d(TAG, "DTB $i not in definitions, running smart detection...")
-                        val scanResult = DtsScanner.scanContent(content, i)
-                        Log.d(
-                            TAG, "Smart detect DTB $i: valid=${scanResult.isValid}, " +
-                                "strategy=${scanResult.recommendedStrategy}, bins=${scanResult.binCount}, " +
-                                "levels=${scanResult.levelCount}, voltType=${scanResult.voltageType}, " +
-                                "confidence=${scanResult.confidence}"
-                        )
+                    Log.d(TAG, "Running smart detection for DTB $i...")
+                    val scanResult = DtsScanner.scanContent(content, i)
 
-                        if (scanResult.isValid) {
-                            // Smart detection succeeded — create a proper working ChipDefinition
-                            val smartDef = DtsScanner.toChipDefinition(scanResult)
-                            // Save it so it persists across sessions
+                    val def = if (scanResult.isValid) {
+                        val smartDef = DtsScanner.toChipDefinition(scanResult)
+                        if (activeDtbIdByPartition[partition] == i) {
                             saveCustomDefinition(smartDef)
-                            smartDef
-                        } else {
-                            createGenericPlaceholder(i, content, dtsModel)
                         }
+                        smartDef
+                    } else {
+                        createGenericPlaceholder(i, content, dtsModel)
                     }
                     partitionDtbs.add(Dtb(i, def, partition))
                 } catch (e: Exception) {
@@ -987,8 +898,6 @@ open class DeviceRepository @Inject constructor(
             }
 
             DomainResult.Success(ArrayList(partitionDtbs))
-        } catch (e: IOException) {
-            DomainResult.Failure(AppError.IoError(e.message ?: "Device check failed due to I/O.", e))
         } catch (e: Exception) {
             DomainResult.Failure(AppError.UnknownError(e.message ?: "Device check failed.", e))
         }
@@ -1010,24 +919,6 @@ open class DeviceRepository @Inject constructor(
             needsCaTargetOffset = false,
             models = listOf(displayModel)
         )
-    }
-    
-    private fun detectChipType(content: String): String? {
-        val m = MODEL_PROPERTY.matcher(content)
-        val modelContent = if (m.find()) m.group(1) ?: "" else ""
-        for (def: ChipDefinition in chipRepository.definitions.value) {
-            for (model in def.models) {
-                if (modelContent.contains(model, ignoreCase = true)) {
-                    if (content.contains("qcom,gpu-pwrlevels {")) {
-                        if (def.strategyType == "SINGLE_BIN") return def.id
-                        val sId = def.id + "_singleBin"
-                        if (chipRepository.getChipById(sId) != null) return sId
-                    }
-                    return def.id
-                }
-            }
-        }
-        return null
     }
 
     private fun parseRuntimeFrequencyOutput(lines: List<String>): List<Long> {
@@ -1066,8 +957,6 @@ open class DeviceRepository @Inject constructor(
             val count = bootImageProcessor.splitAndConvertDtbs(workDirPath, getBinaryPath("dtc"), unpackedType)
             dtbNumByPartition[partition] = count
             DomainResult.Success(Unit)
-        } catch (e: IOException) {
-            DomainResult.Failure(AppError.IoError(e.message ?: "Failed to unpack and convert boot image.", e))
         } catch (e: Exception) {
             DomainResult.Failure(AppError.BootImageError(e.message ?: "Boot image processing failed.", e))
         }
@@ -1096,8 +985,6 @@ open class DeviceRepository @Inject constructor(
                 )
             }
             DomainResult.Success(output)
-        } catch (e: IOException) {
-            DomainResult.Failure(AppError.IoError(e.message ?: "Failed to repack boot image.", e))
         } catch (e: Exception) {
             DomainResult.Failure(AppError.BootImageError(e.message ?: "Boot image repack failed.", e))
         }
@@ -1116,13 +1003,12 @@ open class DeviceRepository @Inject constructor(
         val chipId = prefs.getString(KEY_LAST_CHIP_TYPE, null) ?: return false
         val partitionName = prefs.getString(KEY_LAST_PARTITION, null)
         val restoredPartition = TargetPartition.fromName(partitionName) ?: selectedPartition
-        val def = chipRepository.getChipById(chipId) ?: tryLoadCustomDefinition(chipId) ?: return false
+        val def = tryLoadCustomDefinition(chipId) ?: return false
         val file = File(partitionDir(restoredPartition), "$dtbId.dts")
         if (file.exists()) {
             chooseTarget(Dtb(dtbId, def, restoredPartition))
             return true
         }
-        // Backward compatibility for old single-partition workspace layout.
         val legacyFile = File(filesDir, "$dtbId.dts")
         if (legacyFile.exists()) {
             setSelectedPartitionInternal(TargetPartition.VENDOR_BOOT)

@@ -315,7 +315,6 @@ open class GpuRepository @Inject constructor(
             val levelNodes = getLevelNodes(binNode)
             if (levelNodes.isEmpty()) return@launch
 
-            // CRITICAL FIX: Ignore 0Hz padding nodes for duplication template
             val validLevelNodes = levelNodes.filter { (it.getLongValue("qcom,gpu-freq") ?: 0L) > 0L }
             val activeNodes = if (validLevelNodes.isNotEmpty()) validLevelNodes else levelNodes
 
@@ -326,7 +325,6 @@ open class GpuRepository @Inject constructor(
                 val firstLevelChildIndex = binNode.children.indexOf(levelNodes.first())
                 if (firstLevelChildIndex == -1) 0 else firstLevelChildIndex
             } else {
-                // Insert exactly after the last valid node, but BEFORE the 0Hz padding
                 val lastValidChildIndex = binNode.children.indexOf(activeNodes.last())
                 if (lastValidChildIndex == -1) binNode.children.size else lastValidChildIndex + 1
             }
@@ -337,7 +335,6 @@ open class GpuRepository @Inject constructor(
             val insertedLevelIndex = if (toTop) {
                 0 
             } else {
-                // New level index takes the position immediately following the last valid node
                 levelNodes.indexOf(activeNodes.last()) + 1
             }
 
@@ -372,14 +369,11 @@ open class GpuRepository @Inject constructor(
             val sourceBinNode = gpuDomainManager.findBinNode(root, sourceBinIndex) ?: return@launch
             val targetBinNode = gpuDomainManager.findBinNode(root, targetBinIndex) ?: return@launch
 
-            // 1. Extract source level nodes
             val sourceLevelNodes = getLevelNodes(sourceBinNode)
             if (sourceLevelNodes.isEmpty()) return@launch
 
-            // 2. Clone level nodes
             val clonedLevels = sourceLevelNodes.map { it.deepCopy() }
 
-            // 3. Remove existing level nodes from target
             val targetLevelNodes = getLevelNodes(targetBinNode)
             val insertIndex = if (targetLevelNodes.isNotEmpty()) {
                 targetBinNode.children.indexOf(targetLevelNodes.first())
@@ -392,22 +386,18 @@ open class GpuRepository @Inject constructor(
                 it.parent = null
             }
 
-            // 4. Add cloned nodes to target
             clonedLevels.forEachIndexed { idx, node ->
                 targetBinNode.children.add(insertIndex + idx, node)
                 node.parent = targetBinNode
             }
 
-            // 5. Renumber
             renumberLevelNodes(targetBinNode)
 
-            // 6. Fix pointers in target bin (initial-pwrlevel, ca-target-pwrlevel)
             val maxLevelIndex = (clonedLevels.size - 1).coerceAtLeast(0)
             targetBinNode.properties.forEach { property ->
                 if (isPowerLevelPointerProperty(property.name)) {
                     val currentIndex = parseSingleCellIndex(property.originalValue)
                     if (currentIndex != null && currentIndex > maxLevelIndex) {
-                        // Preserve formatting using setPropertyPreservingFormat
                         setPropertyPreservingFormat(targetBinNode, property.name, maxLevelIndex.toString())
                     }
                 }
@@ -516,11 +506,6 @@ open class GpuRepository @Inject constructor(
         const val LEVEL_NODE_PREFIX = "qcom,gpu-pwrlevel@"
     }
 
-    // ===== DDR / LLCC Memory Table Operations =====
-
-    /**
-     * Updates the frequency list for a specific memory table node.
-     */
     fun updateMemoryTable(nodeName: String, newFrequencies: List<Long>, historyDesc: String) {
         repoScope.launch {
             val root = getTreeCopy() ?: return@launch
@@ -530,9 +515,6 @@ open class GpuRepository @Inject constructor(
         }
     }
 
-    /**
-     * Adds a new frequency with the user-specified value to a memory table.
-     */
     fun addMemoryFrequency(nodeName: String, newFrequencyKHz: Long, historyDesc: String) {
         repoScope.launch {
             val root = getTreeCopy() ?: return@launch
@@ -548,9 +530,6 @@ open class GpuRepository @Inject constructor(
         }
     }
 
-    /**
-     * Deletes a frequency at the given index from a memory table.
-     */
     fun deleteMemoryFrequency(nodeName: String, index: Int, historyDesc: String) {
         repoScope.launch {
             val root = getTreeCopy() ?: return@launch
@@ -561,17 +540,12 @@ open class GpuRepository @Inject constructor(
 
             val newFrequencies = currentTable.frequenciesKHz.toMutableList()
             newFrequencies.removeAt(index)
-            if (newFrequencies.isEmpty()) return@launch  // Don't allow empty table
+            if (newFrequencies.isEmpty()) return@launch
             if (!ddrDomainManager.updateMemoryTable(tableNode, newFrequencies)) return@launch
             commitTreeChanges(historyDesc, root)
         }
     }
     
-    // ===== UFS Operations =====
-
-    /**
-     * Updates a clock min/max frequency pair in a UFS table.
-     */
     fun updateUfsClockFrequencies(nodeName: String, minIndex: Int, newMinHz: Long, maxIndex: Int, newMaxHz: Long, historyDesc: String) {
         repoScope.launch {
             val root = getTreeCopy() ?: return@launch
@@ -787,19 +761,10 @@ open class GpuRepository @Inject constructor(
     }
     
     private fun mapChipIdToGpuName(chipid: Long): String {
-        val major = ((chipid shr 24) and 0xFF).toInt()
-        val minor = ((chipid shr 16) and 0xFF).toInt()
-        return when {
-            major == 6 && minor == 4 -> "Adreno 640"
-            major == 6 && minor == 5 -> "Adreno 650"
-            major == 6 && minor == 6 -> "Adreno 660"
-            major == 6 && minor == 8 -> "Adreno 680"
-            major == 6 && minor == 9 -> "Adreno 690"
-            major == 7 && minor == 3 -> "Adreno 730"
-            major == 7 && minor == 4 -> "Adreno 740"
-            major == 7 && minor == 5 -> "Adreno 750"
-            else -> "Adreno ${major}${minor}0"
-        }
+        val core = ((chipid ushr 24) and 0xFF).toInt()
+        val major = ((chipid ushr 16) and 0xFF).toInt()
+        val minor = ((chipid ushr 8) and 0xFF).toInt()
+        return "Adreno $core$major$minor"
     }
 
     fun updateGpuModelName(newName: String) {

@@ -19,8 +19,6 @@ object AppModule {
         return app.getSharedPreferences("konabess_prefs", Context.MODE_PRIVATE)
     }
 
-    // Repositories are provided by their @Inject constructor + @Singleton annotation.
-    // Explicit provision is not needed unless binding to an interface or configuration is required.
     @Provides
     @Singleton
     fun provideExportHistoryManager(@dagger.hilt.android.qualifiers.ApplicationContext context: Context): com.ireddragonicy.konabessnext.utils.ExportHistoryManager {
@@ -43,11 +41,5 @@ object AppModule {
     @Singleton
     fun provideAssetDataSource(@dagger.hilt.android.qualifiers.ApplicationContext context: Context): com.ireddragonicy.konabessnext.core.interfaces.AssetDataSource {
         return com.ireddragonicy.konabessnext.core.impl.AndroidAssetDataSource(context)
-    }
-
-    @Provides
-    @Singleton
-    fun provideChipDefinitionLoader(assetDataSource: com.ireddragonicy.konabessnext.core.interfaces.AssetDataSource): com.ireddragonicy.konabessnext.core.interfaces.ChipDefinitionLoader {
-        return com.ireddragonicy.konabessnext.core.impl.JsonChipDefinitionLoader(assetDataSource)
     }
 }

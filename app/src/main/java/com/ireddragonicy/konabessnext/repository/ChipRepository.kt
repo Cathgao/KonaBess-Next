@@ -1,6 +1,5 @@
 package com.ireddragonicy.konabessnext.repository
 
-import com.ireddragonicy.konabessnext.core.interfaces.ChipDefinitionLoader
 import com.ireddragonicy.konabessnext.model.ChipDefinition
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -9,26 +8,18 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-open class ChipRepository @Inject constructor(
-    private val loader: ChipDefinitionLoader
-) : ChipRepositoryInterface {
+open class ChipRepository @Inject constructor() : ChipRepositoryInterface {
     private val _definitions = MutableStateFlow<List<ChipDefinition>>(emptyList())
     override val definitions: StateFlow<List<ChipDefinition>> = _definitions.asStateFlow()
 
     private val _currentChip = MutableStateFlow<ChipDefinition?>(null)
     override val currentChip: StateFlow<ChipDefinition?> = _currentChip.asStateFlow()
 
-    init {
-        loadDefinitions()
-    }
-
-    override fun loadDefinitions() {
-        val defs = loader.loadDefinitions()
-        _definitions.value = defs
-    }
-
     override fun setCurrentChip(chip: ChipDefinition?) {
         _currentChip.value = chip
+        if (chip != null && !_definitions.value.contains(chip)) {
+            _definitions.value = _definitions.value + chip
+        }
     }
 
     override fun getChipById(id: String): ChipDefinition? {
@@ -46,9 +37,7 @@ open class ChipRepository @Inject constructor(
         val size = c.levelCount
         val resolved = c.resolvedLevels
         return Array(size) { i ->
-            // Map keys in JSON are indices (0-based)
             resolved[i] ?: (i + 1).toString()
         }
     }
 }
-
