@@ -107,6 +107,11 @@ class GpuStabilityRepository @Inject constructor(
     private var lastSeenRenderError: Int? = null
     private var originalLimits: OriginalLimits? = null
 
+    @Volatile private var resolvedCurFreqPath: String? = null
+    @Volatile private var resolvedBusyPath: String? = null
+    @Volatile private var resolvedTempPath: String? = null
+    @Volatile private var resolvedTempCommand: String? = null
+
     val events: Flow<TestEvent> = _events.asSharedFlow()
     val isRunning: Boolean get() = _running.value
 
@@ -331,12 +336,15 @@ class GpuStabilityRepository @Inject constructor(
         var noLoadStreak = 0
         val startMs = System.currentTimeMillis()
         var failureReason: FailureReason? = null
+        val tickMs = startMs + 1000L
         for (sec in 0 until durationSec) {
             if (!_running.value) {
                 failureReason = FailureReason.AbortedByUser
                 break
             }
-            delay(1000L)
+            val now = System.currentTimeMillis()
+            val sleepMs = (tickMs + sec * 1000L) - now
+            if (sleepMs > 0) delay(sleepMs)
             val sample = readSample(targetFreqHz)
             samples += sample
             // Stream this sample up to the caller (the ViewModel appends it to
@@ -382,27 +390,29 @@ class GpuStabilityRepository @Inject constructor(
     }
 
     private suspend fun readSample(targetFreqHz: Long): GpuSample {
-        // Try every candidate path for cur_freq / busy; stop at the first one
-        // that returns a parseable positive number.
-        var curFreq: Long = 0L
-        for (path in CUR_FREQ_PATHS) {
-            val raw = shellExecutor.execForOutput("cat $path").firstOrNull()?.trim()
-            val parsed = raw?.toLongOrNull()
-            if (parsed != null && parsed > 0L) {
-                curFreq = parsed
-                break
-            }
+        val curFreqPath = resolvedCurFreqPath ?: resolveFirstWorkingPath(CUR_FREQ_PATHS, asLong = true)
+            ?.also { resolvedCurFreqPath = it }
+        val busyPath = resolvedBusyPath ?: resolveFirstWorkingPath(BUSY_PATHS, asLong = false)
+            ?.also { resolvedBusyPath = it }
+        val tempPath = resolvedTempPath
+        val tempCmd = resolvedTempCommand ?: pickTemperatureCommand()?.also { resolvedTempCommand = it }
+        val sb = StringBuilder()
+        sb.append("cat '").append(curFreqPath ?: "/dev/null").append("' 2>/dev/null; ")
+        sb.append("cat '").append(busyPath ?: "/dev/null").append("' 2>/dev/null; ")
+        if (tempPath != null) {
+            sb.append("cat '").append(tempPath).append("' 2>/dev/null; ")
+        } else if (tempCmd != null) {
+            sb.append(tempCmd).append(" 2>/dev/null; ")
         }
-        var busy: Int? = null
-        for (path in BUSY_PATHS) {
-            val raw = shellExecutor.execForOutput("cat $path").firstOrNull()?.trim()
-            val parsed = raw?.toIntOrNull()
-            if (parsed != null && parsed >= 0) {
-                busy = parsed.coerceIn(0, 100)
-                break
-            }
-        }
-        val temp = readTemperatureC()
+        val raw = shellExecutor.execForOutput(sb.toString())
+
+        val curFreq = raw.getOrNull(0)?.trim()?.toLongOrNull()?.takeIf { it > 0L } ?: 0L
+        val busy = raw.getOrNull(1)?.trim()?.toIntOrNull()?.coerceIn(0, 100)
+        val tempRaw = raw.getOrNull(2)?.trim()?.toLongOrNull()
+        val temp = if (tempRaw != null && tempRaw > 0L) {
+            if (tempRaw > 1000L) tempRaw / 1000f else tempRaw.toFloat()
+        } else null
+
         return GpuSample(
             timestampMs = System.currentTimeMillis(),
             targetFreqHz = targetFreqHz,
@@ -414,20 +424,30 @@ class GpuStabilityRepository @Inject constructor(
         )
     }
 
-    private suspend fun readTemperatureC(): Float? {
-        // Prefer the kgsl-reported temperature, fall back to thermal_zone*.
-        val direct = shellExecutor.execForOutput(TEMP_FALLBACK_PATH)
-            .firstOrNull()
-            ?.trim()
-            ?.toLongOrNull()
+    private suspend fun resolveFirstWorkingPath(paths: List<String>, asLong: Boolean): String? {
+        for (path in paths) {
+            val raw = shellExecutor.execForOutput("cat '$path' 2>/dev/null").firstOrNull()?.trim()
+            if (asLong) {
+                if (raw?.toLongOrNull()?.let { it > 0L } == true) return path
+            } else {
+                if (raw?.toIntOrNull()?.let { it in 0..100 } == true) return path
+            }
+        }
+        return null
+    }
+
+    /** Pick the first working temperature path. Kept separate from [resolveFirstWorkingPath]
+     *  because TEMP_FALLBACK_PATH is a fixed path and THERMAL_ZONE_CMDS are shell commands. */
+    private suspend fun pickTemperatureCommand(): String? {
+        val direct = shellExecutor.execForOutput("cat '$TEMP_FALLBACK_PATH' 2>/dev/null")
+            .firstOrNull()?.trim()?.toLongOrNull()
         if (direct != null && direct > 0L) {
-            return if (direct > 1000L) direct / 1000f else direct.toFloat()
+            resolvedTempPath = TEMP_FALLBACK_PATH
+            return null  // resolvedTempPath handles it from here
         }
         for (cmd in THERMAL_ZONE_CMDS) {
-            val value = shellExecutor.execForOutput(cmd).firstOrNull()?.trim()?.toLongOrNull()
-            if (value != null && value > 0L) {
-                return if (value > 1000L) value / 1000f else value.toFloat()
-            }
+            val value = shellExecutor.execForOutput("$cmd 2>/dev/null").firstOrNull()?.trim()?.toLongOrNull()
+            if (value != null && value > 0L) return cmd
         }
         return null
     }
