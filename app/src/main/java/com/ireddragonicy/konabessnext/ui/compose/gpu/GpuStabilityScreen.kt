@@ -116,6 +116,7 @@ fun GpuStabilityScreen(
     }
     LaunchedEffect(state.status, surfaceView) {
         surfaceView?.setStressActive(state.status == StabilityStatus.Running)
+        surfaceView?.keepScreenOn = state.status == StabilityStatus.Running
     }
 
     Column(
