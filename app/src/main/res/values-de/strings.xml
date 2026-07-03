@@ -332,6 +332,8 @@
     <string name="select_chipset">Chipsatz wählen</string>
     <string name="settings_auto_save">GPU-Tabelle automatisch speichern</string>
     <string name="settings_auto_save_desc">Änderungen an der GPU-Frequenztabelle automatisch speichern</string>
+    <string name="settings_dim_brightness_during_stress">Bildschirmhelligkeit bei Stresstests dimmen</string>
+    <string name="settings_dim_brightness_during_stress_desc">Verhindert Einbrennen bei langen Tests</string>
     <string name="settings_color_palette">Farbpalette</string>
     <string name="settings_color_palette_desc">Wählen Sie Ihr Farbschema</string>
     <string name="settings_dynamic_color">Dynamische Farben</string>

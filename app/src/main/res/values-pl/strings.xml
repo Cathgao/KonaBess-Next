@@ -364,6 +364,8 @@
     <string name="settings_freq_unit_desc">Wyświetlaj częstotliwość w Hz, MHz lub GHz</string>
     <string name="settings_auto_save">Autozapis tabeli GPU</string>
     <string name="settings_auto_save_desc">Automatycznie zapisuj zmiany w tabeli częstotliwości GPU</string>
+    <string name="settings_dim_brightness_during_stress">Przyciemnij jasność ekranu podczas testów stabilności</string>
+    <string name="settings_dim_brightness_during_stress_desc">Zapobiega wypalaniu ekranu podczas długich testów</string>
     <string name="settings_root_mode">Tryb root</string>
     <string name="settings_root_mode_desc_on">Używanie roota (su) do wyodrębniania i wgrywania obrazu boot</string>
     <string name="settings_root_mode_desc_off">Bez roota: import/eksport plików ręcznie przez SAF</string>

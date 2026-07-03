@@ -41,6 +41,9 @@ class SettingsRepository @Inject constructor(
     fun isAmoledMode(): Boolean = prefs.getBoolean(SettingsViewModel.KEY_AMOLED_MODE, false)
     fun setAmoledMode(enabled: Boolean) = prefs.edit().putBoolean(SettingsViewModel.KEY_AMOLED_MODE, enabled).apply()
 
+    fun isDimBrightnessDuringStress(): Boolean = prefs.getBoolean(SettingsViewModel.KEY_DIM_BRIGHTNESS_DURING_STRESS, true)
+    fun setDimBrightnessDuringStress(enabled: Boolean) = prefs.edit().putBoolean(SettingsViewModel.KEY_DIM_BRIGHTNESS_DURING_STRESS, enabled).apply()
+
     fun getUpdateChannel(): String = prefs.getString("update_channel", "stable") ?: "stable"
     fun setUpdateChannel(channel: String) = prefs.edit().putString("update_channel", channel).apply()
     

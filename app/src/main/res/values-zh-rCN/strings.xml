@@ -291,6 +291,8 @@
     <string name="settings_freq_unit_desc">显示频率单位为 Hz, MHz 或 GHz</string>
     <string name="settings_auto_save">自动保存 GPU 表</string>
     <string name="settings_auto_save_desc">每次编辑后自动保存 GPU 频率表</string>
+    <string name="settings_dim_brightness_during_stress">压力测试时将系统亮度调到最低</string>
+    <string name="settings_dim_brightness_during_stress_desc">防止长时间测试时烧屏</string>
     <string name="settings_help_about">帮助与关于</string>
     <string name="settings_version_format">版本 %1$s</string>
     <string name="settings_color_palette">配色方案</string>

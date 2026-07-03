@@ -399,6 +399,8 @@
     <string name="settings_freq_unit_desc">Display frequency in Hz, MHz, or GHz</string>
     <string name="settings_auto_save">Auto-save GPU Table</string>
     <string name="settings_auto_save_desc">Automatically save changes to GPU frequency table</string>
+    <string name="settings_dim_brightness_during_stress">Dim screen brightness during stress tests</string>
+    <string name="settings_dim_brightness_during_stress_desc">Prevents screen burn-in during long tests</string>
     <string name="settings_root_mode">Root Mode</string>
     <string name="settings_root_mode_desc_on">Using root (su) for boot image extraction &amp; flashing</string>
     <string name="settings_root_mode_desc_off">Non-root: import/export files manually via SAF</string>

@@ -3,6 +3,7 @@ package com.ireddragonicy.konabessnext.viewmodel.gpu
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ireddragonicy.konabessnext.core.model.DomainResult
+import com.ireddragonicy.konabessnext.core.system.WindowBrightnessController
 import com.ireddragonicy.konabessnext.model.gpu.FailureReason
 import com.ireddragonicy.konabessnext.model.gpu.GpuSample
 import com.ireddragonicy.konabessnext.model.gpu.GpuStabilityUiState
@@ -34,6 +35,7 @@ class GpuStabilityViewModel @Inject constructor(
     private val stabilityRepository: GpuStabilityRepository,
     private val shellRepository: ShellRepository,
     private val settingsRepository: SettingsRepository,
+    private val brightnessController: WindowBrightnessController,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GpuStabilityUiState())
@@ -157,12 +159,39 @@ class GpuStabilityViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Dim the activity window while a stress test is running, when the user
+     * opted into "Dim screen brightness during stress tests" in Settings.
+     *
+     * Acts as a single hook so both start paths (pinning sweep and free run)
+     * stay in sync. No-op if the setting is off, if no test is starting, or
+     * if the controller has no attached activity yet. Idempotent.
+     */
+    private fun dimWindowForStressTestIfEnabled() {
+        if (!settingsRepository.isDimBrightnessDuringStress()) return
+        brightnessController.dimForStressTest()
+    }
+
+    /**
+     * Idempotently release any brightness override that was set during a
+     * stress test. Called from every path that terminates the test: all
+     * `TestEvent` terminal branches, both `CancellationException` blocks, the
+     * freerun flow-clean completion block, and `onCleared`. Safe to spam.
+     */
+    private fun restoreWindowBrightness() {
+        brightnessController.restore()
+    }
+
     private fun startPinningTest() {
         val snapshot = _uiState.value
         if (snapshot.activeFrequenciesHz.isEmpty()) {
             _uiState.update { it.copy(failureReason = FailureReason.NoFrequencies) }
             return
         }
+        // Dim the activity window *before* flipping UI state to Running so
+        // the dim takes effect synchronously with the first frame rendered
+        // by the GL renderer.
+        dimWindowForStressTestIfEnabled()
         _uiState.update {
             it.copy(
                 status = StabilityStatus.Running,
@@ -191,12 +220,14 @@ class GpuStabilityViewModel @Inject constructor(
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 _uiState.update { it.copy(status = StabilityStatus.Aborted) }
                 stopElapsedTicker()
+                restoreWindowBrightness()
                 throw ce
             }
         }
     }
 
     private fun startFreeRunTest() {
+        dimWindowForStressTestIfEnabled()
         _uiState.update {
             it.copy(
                 status = StabilityStatus.Running,
@@ -226,6 +257,7 @@ class GpuStabilityViewModel @Inject constructor(
                         elapsedSec = 0,
                     )
                 }
+                restoreWindowBrightness()
             } catch (ce: kotlinx.coroutines.CancellationException) {
                 _uiState.update {
                     it.copy(
@@ -235,6 +267,7 @@ class GpuStabilityViewModel @Inject constructor(
                     )
                 }
                 stopElapsedTicker()
+                restoreWindowBrightness()
                 throw ce
             }
         }
@@ -326,6 +359,7 @@ class GpuStabilityViewModel @Inject constructor(
                         resultsDialogDismissed = it.results.isEmpty(),
                     )
                 }
+                restoreWindowBrightness()
             }
             GpuStabilityRepository.TestEvent.AllCompleted -> {
                 stopElapsedTicker()
@@ -340,6 +374,7 @@ class GpuStabilityViewModel @Inject constructor(
                         resultsDialogDismissed = it.results.isEmpty(),
                     )
                 }
+                restoreWindowBrightness()
             }
             GpuStabilityRepository.TestEvent.Aborted -> {
                 stopElapsedTicker()
@@ -363,6 +398,7 @@ class GpuStabilityViewModel @Inject constructor(
                         )
                     }
                 }
+                restoreWindowBrightness()
             }
         }
     }
@@ -396,6 +432,10 @@ class GpuStabilityViewModel @Inject constructor(
         super.onCleared()
         sweepJob?.cancel()
         elapsedJob?.cancel()
+        // Always release the brightness override when the ViewModel is torn
+        // down, regardless of whether the test was running. Idempotent — if
+        // we were never dimmed, this is a no-op.
+        restoreWindowBrightness()
         viewModelScope.launch { stabilityRepository.cancelTest() }
     }
 }
