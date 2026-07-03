@@ -743,7 +743,11 @@
     <string name="stability_no_freq">未检测到可用的 GPU 频率。</string>
     <string name="stability_config">配置</string>
     <string name="stability_duration_label">单点持续时间</string>
-    <string name="stability_total_points_fmt">将测试 %1$d 个频率点。</string>
+    <string name="stability_total_points_fmt">待测试 %1$d 个频率点</string>
+    <string name="stability_select_freq_title">选择测试频点</string>
+    <string name="stability_select_freq_action">选择</string>
+    <string name="stability_select_all">全选</string>
+    <string name="stability_deselect_all">全不选</string>
     <string name="stability_start">开始测试</string>
     <string name="stability_stop">停止</string>
     <string name="stability_clear">清空结果</string>

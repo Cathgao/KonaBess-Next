@@ -749,7 +749,11 @@
     <string name="stability_no_freq">No GPU frequencies detected on this device.</string>
     <string name="stability_config">Configuration</string>
     <string name="stability_duration_label">Duration per point</string>
-    <string name="stability_total_points_fmt">%1$d frequency point(s) will be tested.</string>
+    <string name="stability_total_points_fmt">Pending test: %1$d frequency point(s)</string>
+    <string name="stability_select_freq_title">Choose frequencies to test</string>
+    <string name="stability_select_freq_action">Select</string>
+    <string name="stability_select_all">Select all</string>
+    <string name="stability_deselect_all">Deselect all</string>
     <string name="stability_start">Start Test</string>
     <string name="stability_stop">Stop</string>
     <string name="stability_clear">Clear Results</string>

@@ -112,14 +112,47 @@ class GpuStabilityViewModel @Inject constructor(
             when (result) {
                 is DomainResult.Success -> current.copy(
                     activeFrequenciesHz = result.data,
+                    // Auto-select every freshly probed frequency so the
+                    // existing "sweep-all" UX is preserved until the user
+                    // explicitly deselects something in the picker dialog.
+                    selectedFrequenciesHz = result.data.toSet(),
                     failureMessage = null,
                 )
                 is DomainResult.Failure -> current.copy(
                     activeFrequenciesHz = emptyList(),
+                    selectedFrequenciesHz = emptySet(),
                     failureMessage = result.error.message,
                 )
             }
         }
+    }
+
+    /**
+     * Replace the user's selected frequency subset. Called from the picker
+     * dialog. May be empty — the Start button is then expected to be
+     * disabled by the UI.
+     *
+     * Stale entries (frequencies that no longer appear in
+     * [GpuStabilityUiState.activeFrequenciesHz]) are pruned on write so we
+     * never hold dangling references after a refresh.
+     */
+    fun setSelectedFrequencies(set: Set<Long>) {
+        _uiState.update { current ->
+            val pruned = set.intersect(current.activeFrequenciesHz.toSet())
+            current.copy(selectedFrequenciesHz = pruned)
+        }
+    }
+
+    /** Convenience: select every frequency currently in the active list. */
+    fun selectAllFrequencies() {
+        _uiState.update { current ->
+            current.copy(selectedFrequenciesHz = current.activeFrequenciesHz.toSet())
+        }
+    }
+
+    /** Convenience: clear the user's selection. */
+    fun deselectAllFrequencies() {
+        _uiState.update { it.copy(selectedFrequenciesHz = emptySet()) }
     }
 
     /**
@@ -184,7 +217,17 @@ class GpuStabilityViewModel @Inject constructor(
 
     private fun startPinningTest() {
         val snapshot = _uiState.value
-        if (snapshot.activeFrequenciesHz.isEmpty()) {
+        // Honour the user's frequency selection. If they've explicitly
+        // cleared the picker but there are still active frequencies, treat
+        // this the same as "nothing to test" — refuse rather than silently
+        // sweeping the full set.
+        val candidates: List<Long> = when {
+            snapshot.selectedFrequenciesHz.isNotEmpty() ->
+                snapshot.activeFrequenciesHz.filter { it in snapshot.selectedFrequenciesHz }
+            snapshot.activeFrequenciesHz.isEmpty() -> emptyList()
+            else -> snapshot.activeFrequenciesHz
+        }
+        if (candidates.isEmpty()) {
             _uiState.update { it.copy(failureReason = FailureReason.NoFrequencies) }
             return
         }
@@ -196,7 +239,7 @@ class GpuStabilityViewModel @Inject constructor(
             it.copy(
                 status = StabilityStatus.Running,
                 results = emptyList(),
-                currentTargetHz = it.activeFrequenciesHz.first(),
+                currentTargetHz = candidates.first(),
                 elapsedSec = 0,
                 currentSamples = emptyList(),
                 failureMessage = null,
@@ -210,8 +253,9 @@ class GpuStabilityViewModel @Inject constructor(
         startElapsedTicker()
         // Build the state from the live snapshot so the per-point duration
         // reflects whatever the user last set (and not a stale copy captured
-        // before the run started).
-        val currentSnapshot = _uiState.value
+        // before the run started). Pass the user-selected candidate list to
+        // the repository instead of the full active list.
+        val currentSnapshot = _uiState.value.copy(activeFrequenciesHz = candidates)
         sweepJob = viewModelScope.launch {
             try {
                 stabilityRepository.runStabilityTest(currentSnapshot).collect { event ->

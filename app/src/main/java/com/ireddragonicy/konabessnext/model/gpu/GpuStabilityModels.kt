@@ -97,6 +97,14 @@ data class GpuStabilityUiState(
     val mode: GpuTestMode = GpuTestMode.Freerun,
     val isRootPinningCapable: Boolean = false,
     val activeFrequenciesHz: List<Long> = emptyList(),
+    /**
+     * Subset of [activeFrequenciesHz] the user has chosen to actually test.
+     * Empty set means "follow [activeFrequenciesHz] verbatim" (this is the
+     * initial state right after a fresh frequency refresh — auto-populated
+     * by the ViewModel so behaviour stays identical to the pre-existing
+     * sweep-all flow until the user explicitly deselects something).
+     */
+    val selectedFrequenciesHz: Set<Long> = emptySet(),
     val status: StabilityStatus = StabilityStatus.Idle,
     val currentTargetHz: Long? = null,
     val elapsedSec: Int = 0,
@@ -127,7 +135,14 @@ data class GpuStabilityUiState(
     val resultsDialogDismissed: Boolean = true,
 ) {
     val isRootAvailable: Boolean get() = isRootPinningCapable // back-compat alias
-    val totalPoints: Int get() = activeFrequenciesHz.size
+    /**
+     * Total points the run will iterate over. Once the user has explicitly
+     * touched the frequency-selector dialog we honour their selection;
+     * before any user interaction we fall through to the full list so the
+     * default behaviour (sweep-all) is unchanged.
+     */
+    val totalPoints: Int get() = if (selectedFrequenciesHz.isNotEmpty())
+        selectedFrequenciesHz.size else activeFrequenciesHz.size
     val completedPoints: Int get() = results.size
     val progressRatio: Float
         get() = if (totalPoints == 0) 0f else completedPoints.toFloat() / totalPoints

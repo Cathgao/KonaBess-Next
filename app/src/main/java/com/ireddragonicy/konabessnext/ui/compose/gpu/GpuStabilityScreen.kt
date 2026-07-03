@@ -45,6 +45,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.Checkbox
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -75,6 +80,13 @@ fun GpuStabilityScreen(
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    // The frequency picker dialog is local UI state — not ViewModel state,
+    // because the dialog only makes sense while we're standing on this
+    // screen. (Resetting it when the user navigates away to the Settings
+    // tab and back is the desired behaviour; we don't want a stale dialog
+    // popping up unprompted.)
+    var showFreqPicker by remember { mutableStateOf(false) }
 
     // The VM subscribes to SettingsRepository.rootModeFlow() in its init block,
 // so toggling Root Mode in the Settings tab automatically triggers a
@@ -170,7 +182,11 @@ fun GpuStabilityScreen(
                 state.status != StabilityStatus.Running
             ) {
                 item {
-                    ConfigCard(state = state, onDurationChanged = viewModel::setDurationPerPoint)
+                    ConfigCard(
+                        state = state,
+                        onDurationChanged = viewModel::setDurationPerPoint,
+                        onSelectFrequenciesClick = { showFreqPicker = true },
+                    )
                 }
             }
             item { ChartCard(state = state) }
@@ -211,6 +227,28 @@ fun GpuStabilityScreen(
         ResultsDialog(
             state = state,
             onDismiss = { viewModel.dismissResultsDialog() },
+        )
+    }
+
+    // Frequency-selection dialog. Only available in pinning mode and only
+    // when there is at least one discovered frequency to choose from; the
+    // button that opens it is hidden under the same conditions, so the
+    // dialog itself can't be opened in an unsupported state. We render it
+    // unconditionally here so the click handler can set showFreqPicker=true
+    // without first having to re-check the gating conditions.
+    if (showFreqPicker) {
+        SelectFrequenciesDialog(
+            state = state,
+            onToggle = { freq ->
+                val newSet = state.selectedFrequenciesHz.toMutableSet().apply {
+                    if (!add(freq)) remove(freq)
+                }
+                viewModel.setSelectedFrequencies(newSet)
+            },
+            onSelectAll = viewModel::selectAllFrequencies,
+            onDeselectAll = viewModel::deselectAllFrequencies,
+            onConfirm = { showFreqPicker = false },
+            onDismiss = { showFreqPicker = false },
         )
     }
 }
@@ -301,6 +339,7 @@ private fun headerStatusLine(state: GpuStabilityUiState): String {
 private fun ConfigCard(
     state: GpuStabilityUiState,
     onDurationChanged: (Int) -> Unit,
+    onSelectFrequenciesClick: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -330,8 +369,36 @@ private fun ConfigCard(
                     suffix = "s",
                 )
             }
+            // Frequency picker. Only meaningful when at least one frequency
+            // has been discovered; otherwise the button would just open a
+            // empty dialog.
+            if (state.activeFrequenciesHz.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        stringResource(R.string.stability_select_freq_title),
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    OutlinedButton(
+                        onClick = onSelectFrequenciesClick,
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Text(stringResource(R.string.stability_select_freq_action))
+                    }
+                }
+            }
+            // Bottom-line copy mirrors the existing affordance ("XX frequency
+            // points will be tested") but is now driven by the user's picker
+            // selection instead of the raw active count. While the user has
+            // never touched the picker (selectedFrequenciesHz empty), we
+            // fall back to the full active count so the first-launch UX is
+            // unchanged from the pre-feature behaviour.
+            val pendingCount = if (state.selectedFrequenciesHz.isNotEmpty())
+                state.selectedFrequenciesHz.size
+            else
+                state.activeFrequenciesHz.size
             Text(
-                text = stringResource(R.string.stability_total_points_fmt, state.activeFrequenciesHz.size),
+                text = stringResource(R.string.stability_total_points_fmt, pendingCount),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
             )
@@ -577,6 +644,82 @@ private fun ResultsDialog(state: GpuStabilityUiState, onDismiss: () -> Unit) {
         confirmButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.ok))
+            }
+        },
+    )
+}
+
+/**
+ * Multi-select dialog for choosing the subset of GPU frequency points to
+ * sweep. Driven entirely by [state.activeFrequenciesHz]; the user's tick
+ * state lives in [state.selectedFrequenciesHz].
+ *
+ * The "OK" button is greyed out unless at least one frequency is selected —
+ * the same shape used by Material's confirmation-alert conventions.
+ */
+@Composable
+private fun SelectFrequenciesDialog(
+    state: GpuStabilityUiState,
+    onToggle: (Long) -> Unit,
+    onSelectAll: () -> Unit,
+    onDeselectAll: () -> Unit,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val canConfirm = state.selectedFrequenciesHz.isNotEmpty()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.stability_select_freq_title)) },
+        text = {
+            // LazyColumn so 100+ frequency points don't trip
+            // Compose's recomposition cost on every click.
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 480.dp),
+                state = rememberLazyListState(),
+            ) {
+                items(items = state.activeFrequenciesHz, key = { it }) { freq ->
+                    val checked = state.selectedFrequenciesHz.contains(freq)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onToggle(freq) }
+                            .padding(vertical = 4.dp),
+                    ) {
+                        Checkbox(
+                            checked = checked,
+                            onCheckedChange = { onToggle(freq) },
+                        )
+                        Text(
+                            text = "${freq / 1_000_000} MHz",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm, enabled = canConfirm) {
+                Text(stringResource(R.string.ok))
+            }
+        },
+        dismissButton = {
+            // "Select all" / "Deselect all" sit in the dismiss slot so they
+            // don't crowd the confirm area; tapping outside the dialog
+            // behaves the same as Cancel.
+            Row {
+                TextButton(onClick = onSelectAll) {
+                    Text(stringResource(R.string.stability_select_all))
+                }
+                TextButton(onClick = onDeselectAll) {
+                    Text(stringResource(R.string.stability_deselect_all))
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.cancel))
+                }
             }
         },
     )
