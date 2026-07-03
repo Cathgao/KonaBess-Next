@@ -58,6 +58,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.ireddragonicy.konabessnext.R
+import com.ireddragonicy.konabessnext.model.gpu.FailureReason
 import com.ireddragonicy.konabessnext.model.gpu.FreqPointResult
 import com.ireddragonicy.konabessnext.model.gpu.GpuStabilityUiState
 import com.ireddragonicy.konabessnext.model.gpu.StabilityStatus
@@ -288,7 +289,9 @@ private fun headerStatusLine(state: GpuStabilityUiState): String {
             }
         }
         StabilityStatus.Completed -> stringResource(R.string.stability_status_completed)
-        StabilityStatus.Failed -> state.failureMessage ?: stringResource(R.string.stability_status_failed)
+        StabilityStatus.Failed -> state.failureReason?.localized()
+            ?: state.failureMessage
+            ?: stringResource(R.string.stability_status_failed)
         StabilityStatus.Aborted -> stringResource(R.string.stability_status_aborted)
     }
 }
@@ -373,7 +376,8 @@ private fun SurfaceViewCard(
                         text = when (state.status) {
                             StabilityStatus.Idle -> stringResource(R.string.stability_idle_hint)
                             StabilityStatus.Completed -> stringResource(R.string.stability_summary_pass)
-                            StabilityStatus.Failed -> state.failureMessage
+                            StabilityStatus.Failed -> state.failureReason?.localized()
+                                ?: state.failureMessage
                                 ?: stringResource(R.string.stability_failure_generic)
                             StabilityStatus.Aborted -> stringResource(R.string.stability_aborted)
                             else -> ""
@@ -533,7 +537,12 @@ private fun ResultRow(result: FreqPointResult) {
                 text = if (result.passed) {
                     stringResource(R.string.stability_pass_fmt, mhz, result.durationSec)
                 } else {
-                    stringResource(R.string.stability_fail_fmt, mhz, result.durationSec, result.failureReason ?: "")
+                    // Translate the reason to a localized string, then build the
+                    // per-point failure row. Falls back to the legacy
+                    // "FAIL — X MHz (Y s): <reason>" format if no specific reason
+                    // was attached (e.g. tests that don't set failureReason).
+                    val reasonText = result.failureReason?.localized() ?: ""
+                    stringResource(R.string.stability_fail_reason_fmt, mhz, reasonText)
                 },
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -553,8 +562,10 @@ private fun ResultsDialog(state: GpuStabilityUiState, onDismiss: () -> Unit) {
                 if (state.status == StabilityStatus.Completed) {
                     Text(stringResource(R.string.stability_summary_pass))
                 } else {
+                    val localized = state.failureReason?.localized()
                     Text(
-                        text = state.failureMessage
+                        text = localized
+                            ?: state.failureMessage
                             ?: stringResource(R.string.stability_summary_fail_fmt, totalCount - passedCount, totalCount),
                     )
                 }
@@ -624,7 +635,9 @@ private fun EmptyState(state: GpuStabilityUiState) {
                 CircularProgressIndicator()
                 Spacer(Modifier.size(8.dp))
                 Text(
-                    state.failureMessage ?: stringResource(R.string.stability_no_freq),
+                    state.failureReason?.localized()
+                        ?: state.failureMessage
+                        ?: stringResource(R.string.stability_no_freq),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -658,4 +671,24 @@ private fun Stepper(
             shape = RoundedCornerShape(12.dp),
         ) { Text("+") }
     }
+}
+
+/**
+ * Localize a [FailureReason] using the current resource configuration.
+ * Mirrors the [FailureReason] sealed-class cases; adding a new case will make
+ * the `when` exhaustive-check fire at compile time as a reminder.
+ */
+@Composable
+private fun FailureReason.localized(): String = when (this) {
+    FailureReason.AbortedByUser -> stringResource(R.string.stability_failure_aborted_by_user)
+    FailureReason.WriteFreqRejected -> stringResource(R.string.stability_failure_write_freq_rejected)
+    is FailureReason.RendererGlError ->
+        stringResource(R.string.stability_failure_renderer_gl_fmt, glErrorHex)
+    is FailureReason.ThrottledBelow ->
+        stringResource(R.string.stability_failure_throttled_below_fmt, throttleRatioPct)
+    FailureReason.NoLoad -> stringResource(R.string.stability_failure_no_load)
+    FailureReason.RootRequired -> stringResource(R.string.stability_failure_root_required)
+    FailureReason.NoFrequencies -> stringResource(R.string.stability_failure_no_frequencies)
+    FailureReason.DevfreqNodeMissing -> stringResource(R.string.stability_failure_devfreq_node_missing)
+    FailureReason.Unknown -> stringResource(R.string.stability_failure_unknown)
 }

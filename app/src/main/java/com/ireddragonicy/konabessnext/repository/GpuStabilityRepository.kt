@@ -3,6 +3,7 @@ package com.ireddragonicy.konabessnext.repository
 import android.util.Log
 import com.ireddragonicy.konabessnext.core.model.AppError
 import com.ireddragonicy.konabessnext.core.model.DomainResult
+import com.ireddragonicy.konabessnext.model.gpu.FailureReason
 import com.ireddragonicy.konabessnext.model.gpu.FreqPointResult
 import com.ireddragonicy.konabessnext.model.gpu.GpuSample
 import com.ireddragonicy.konabessnext.model.gpu.GpuStabilityUiState
@@ -163,16 +164,16 @@ class GpuStabilityRepository @Inject constructor(
             this@flow.emit(event)
         }
         if (!shellExecutor.isRootMode) {
-            publish(TestEvent.Failed("Root mode is required for stability testing."))
+            publish(TestEvent.Failed(FailureReason.RootRequired))
             return@flow
         }
         val candidates = state.activeFrequenciesHz
         if (candidates.isEmpty()) {
-            publish(TestEvent.Failed("No GPU frequencies to test."))
+            publish(TestEvent.Failed(FailureReason.NoFrequencies))
             return@flow
         }
         val nodeDir = resolveGovernorNode() ?: run {
-            publish(TestEvent.Failed("GPU devfreq node not found."))
+            publish(TestEvent.Failed(FailureReason.DevfreqNodeMissing))
             return@flow
         }
         val original = readOriginalLimits(nodeDir)
@@ -190,9 +191,7 @@ class GpuStabilityRepository @Inject constructor(
                 )
                 publish(TestEvent.PointFinished(pointResult))
                 if (!pointResult.passed) {
-                    publish(TestEvent.Failed(
-                        message = "GPU failed at ${target / 1_000_000} MHz: ${pointResult.failureReason ?: "unknown"}"
-                    ))
+                    publish(TestEvent.Failed(reason = pointResult.failureReason ?: FailureReason.Unknown))
                     break
                 }
             }
@@ -237,7 +236,7 @@ class GpuStabilityRepository @Inject constructor(
                 val renderErr = lastSeenRenderError
                 if (renderErr != null && renderErr != 0) {
                     publish(TestEvent.Failed(
-                        "Renderer reported GL error 0x${Integer.toHexString(renderErr)}"
+                        FailureReason.RendererGlError("0x${Integer.toHexString(renderErr)}")
                     ))
                     break
                 }
@@ -319,7 +318,7 @@ class GpuStabilityRepository @Inject constructor(
                 targetFreqHz = targetFreqHz,
                 passed = false,
                 samples = emptyList(),
-                failureReason = "Failed to write min_freq/max_freq (kernel rejected?)",
+                failureReason = FailureReason.WriteFreqRejected,
                 durationSec = 0,
             )
         }
@@ -331,10 +330,10 @@ class GpuStabilityRepository @Inject constructor(
         var throttleStreak = 0
         var noLoadStreak = 0
         val startMs = System.currentTimeMillis()
-        var failureReason: String? = null
+        var failureReason: FailureReason? = null
         for (sec in 0 until durationSec) {
             if (!_running.value) {
-                failureReason = "Aborted by user"
+                failureReason = FailureReason.AbortedByUser
                 break
             }
             delay(1000L)
@@ -346,14 +345,14 @@ class GpuStabilityRepository @Inject constructor(
             val renderErr = lastSeenRenderError
             if (renderErr != null && renderErr != 0) {
                 lastSeenErrorInPoint = renderErr
-                failureReason = "Renderer reported GL error 0x${Integer.toHexString(renderErr)}"
+                failureReason = FailureReason.RendererGlError("0x${Integer.toHexString(renderErr)}")
                 break
             }
             val ratio = if (targetFreqHz > 0L) sample.curFreqHz.toDouble() / targetFreqHz else 0.0
             if (sample.curFreqHz > 0 && ratio * 100 < throttleRatioPct) {
                 throttleStreak++
                 if (throttleStreak >= DEFAULT_THROTTLE_WINDOW_SEC) {
-                    failureReason = "GPU throttled below ${throttleRatioPct}% of target"
+                    failureReason = FailureReason.ThrottledBelow(throttleRatioPct)
                     break
                 }
             } else {
@@ -362,7 +361,7 @@ class GpuStabilityRepository @Inject constructor(
             if (sample.gpuBusyPct == 0) {
                 noLoadStreak++
                 if (noLoadStreak >= DEFAULT_NO_LOAD_WINDOW_SEC) {
-                    failureReason = "GPU load stayed at 0% — stress failed to engage"
+                    failureReason = FailureReason.NoLoad
                     break
                 }
             } else {
@@ -483,7 +482,7 @@ class GpuStabilityRepository @Inject constructor(
     sealed class TestEvent {
         data class PointFinished(val result: FreqPointResult) : TestEvent()
         data class SampleCollected(val sample: GpuSample) : TestEvent()
-        data class Failed(val message: String) : TestEvent()
+        data class Failed(val reason: FailureReason) : TestEvent()
         data object AllCompleted : TestEvent()
         data object Aborted : TestEvent()
     }

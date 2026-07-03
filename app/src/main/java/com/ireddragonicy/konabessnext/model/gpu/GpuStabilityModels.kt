@@ -41,9 +41,38 @@ data class FreqPointResult(
     val targetFreqHz: Long,
     val passed: Boolean,
     val samples: List<GpuSample>,
-    val failureReason: String?,
+    val failureReason: FailureReason? = null,
     val durationSec: Int,
 )
+
+sealed class FailureReason {
+    /** User tapped Stop while a point was running. */
+    object AbortedByUser : FailureReason()
+
+    /** min_freq/max_freq writes were rejected (permissions, kernel locked, etc.). */
+    object WriteFreqRejected : FailureReason()
+
+    /** OpenGL renderer reported an error during the point. */
+    data class RendererGlError(val glErrorHex: String) : FailureReason()
+
+    /** GPU throttled below the configured threshold for too long. */
+    data class ThrottledBelow(val throttleRatioPct: Int) : FailureReason()
+
+    /** GPU load stayed at 0% for too long — stress failed to engage. */
+    object NoLoad : FailureReason()
+
+    /** Run-level: root mode is off, can't pin frequencies. */
+    object RootRequired : FailureReason()
+
+    /** Run-level: no candidate frequencies were discovered. */
+    object NoFrequencies : FailureReason()
+
+    /** Run-level: devfreq sysfs node could not be located on this device. */
+    object DevfreqNodeMissing : FailureReason()
+
+    /** Generic fallback — used when no more specific reason is known. */
+    object Unknown : FailureReason()
+}
 
 /**
  * Which mode the GPU stability test is running in.
@@ -74,6 +103,15 @@ data class GpuStabilityUiState(
     val durationPerPointSec: Int = 60,
     val currentSamples: List<GpuSample> = emptyList(),
     val results: List<FreqPointResult> = emptyList(),
+    val failureReason: FailureReason? = null,
+    /**
+     * @deprecated Use [failureReason] for translatable failure causes. Kept as
+     * an escape hatch for opaque errors coming from outside the stability flow
+     * (e.g. raw [com.ireddragonicy.konabessnext.core.model.AppError] messages
+     * produced during frequency discovery). The UI shows this verbatim when
+     * [failureReason] is null.
+     */
+    @Deprecated("Use failureReason for translatable causes")
     val failureMessage: String? = null,
     val maxGpuTempC: Float? = null,
     val throttlingRatioPct: Int = 70,

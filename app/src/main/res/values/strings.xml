@@ -827,4 +827,19 @@
     <string name="stability_status_freerun_idle">Idle — free-run stress test ready.</string>
     <string name="stability_freerun_running_fmt">Free stress — %1$d samples collected</string>
 
+    <!-- Failure reasons surfaced from the Repository. Keys mirror
+         com.ireddragonicy.konabessnext.model.gpu.FailureReason cases. -->
+    <string name="stability_failure_aborted_by_user">Aborted by user</string>
+    <string name="stability_failure_write_freq_rejected">Kernel refused to lock the GPU frequency</string>
+    <string name="stability_failure_renderer_gl_fmt">Renderer reported a GL error: %1$s</string>
+    <string name="stability_failure_throttled_below_fmt">GPU throttled below %1$d%% of target</string>
+    <string name="stability_failure_no_load">GPU load stayed at 0%% — stress failed to engage</string>
+    <string name="stability_failure_root_required">Root mode is required for stability testing.</string>
+    <string name="stability_failure_no_frequencies">No GPU frequencies to test.</string>
+    <string name="stability_failure_devfreq_node_missing">GPU devfreq node not found.</string>
+    <string name="stability_failure_unknown">Unknown failure.</string>
+    <!-- Per-point failure row format, used in the results list and dialog.
+         %1$d = MHz, %2$s = localized reason. -->
+    <string name="stability_fail_reason_fmt">FAIL — %1$d MHz: %2$s</string>
+
 </resources>

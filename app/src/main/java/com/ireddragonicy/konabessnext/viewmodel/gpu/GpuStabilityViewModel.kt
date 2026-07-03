@@ -3,6 +3,7 @@ package com.ireddragonicy.konabessnext.viewmodel.gpu
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ireddragonicy.konabessnext.core.model.DomainResult
+import com.ireddragonicy.konabessnext.model.gpu.FailureReason
 import com.ireddragonicy.konabessnext.model.gpu.GpuSample
 import com.ireddragonicy.konabessnext.model.gpu.GpuStabilityUiState
 import com.ireddragonicy.konabessnext.model.gpu.GpuTestMode
@@ -159,7 +160,7 @@ class GpuStabilityViewModel @Inject constructor(
     private fun startPinningTest() {
         val snapshot = _uiState.value
         if (snapshot.activeFrequenciesHz.isEmpty()) {
-            _uiState.update { it.copy(failureMessage = "No GPU frequencies to test.") }
+            _uiState.update { it.copy(failureReason = FailureReason.NoFrequencies) }
             return
         }
         _uiState.update {
@@ -315,7 +316,7 @@ class GpuStabilityViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         status = StabilityStatus.Failed,
-                        failureMessage = event.message,
+                        failureReason = event.reason,
                         currentTargetHz = null,
                         elapsedSec = 0,
                         // Arm the results dialog for this terminal status.
