@@ -1,0 +1,105 @@
+package com.ireddragonicy.konabessnext.model.gpu
+
+/**
+ * Status of the overall GPU stability test run.
+ */
+enum class StabilityStatus {
+    Idle,
+    Running,
+    Completed,
+    Failed,
+    Aborted;
+
+    val isTerminal: Boolean get() = this == Completed || this == Failed || this == Aborted
+}
+
+/**
+ * One sample point recorded at ~1 Hz during a per-frequency stress test.
+ *
+ * @param timestampMs wall-clock time of the sample relative to the start of the current point.
+ * @param targetFreqHz the locked frequency in Hz.
+ * @param curFreqHz actual GPU clock as reported by sysfs.
+ * @param gpuBusyPct the GPU utilization percentage, or null when unsupported.
+ * @param temperatureC the SoC/GPU temperature in °C, or null when unavailable.
+ * @param throttled true when curFreq dropped below the throttle threshold for the configured number of consecutive seconds.
+ * @param renderErrorCode last glGetError() value, or null when no error.
+ */
+data class GpuSample(
+    val timestampMs: Long,
+    val targetFreqHz: Long,
+    val curFreqHz: Long,
+    val gpuBusyPct: Int?,
+    val temperatureC: Float?,
+    val throttled: Boolean,
+    val renderErrorCode: Int? = null,
+)
+
+/**
+ * Result of testing a single GPU frequency point.
+ */
+data class FreqPointResult(
+    val targetFreqHz: Long,
+    val passed: Boolean,
+    val samples: List<GpuSample>,
+    val failureReason: String?,
+    val durationSec: Int,
+)
+
+/**
+ * Which mode the GPU stability test is running in.
+ *
+ * - [Pinning] sweeps the active frequency list, locking min_freq==max_freq for a
+ *   fixed duration per point. Requires root.
+ * - [Freerun] samples the GPU continuously without locking anything. Doesn't
+ *   require root; the test runs until the user explicitly stops it.
+ */
+enum class GpuTestMode { Pinning, Freerun }
+
+/**
+ * UI state exposed by [com.ireddragonicy.konabessnext.viewmodel.gpu.GpuStabilityViewModel].
+ *
+ * `isRootPinningCapable` is the derived capability flag — true only when both the
+ * user's settings toggle (root mode) is on AND the device actually has root
+ * access. When false, the UI should switch to freerun rendering and the
+ * ViewModel should dispatch [com.ireddragonicy.konabessnext.repository.GpuStabilityRepository.runFreeStressTest]
+ * instead of `runStabilityTest`.
+ */
+data class GpuStabilityUiState(
+    val mode: GpuTestMode = GpuTestMode.Freerun,
+    val isRootPinningCapable: Boolean = false,
+    val activeFrequenciesHz: List<Long> = emptyList(),
+    val status: StabilityStatus = StabilityStatus.Idle,
+    val currentTargetHz: Long? = null,
+    val elapsedSec: Int = 0,
+    val durationPerPointSec: Int = 60,
+    val currentSamples: List<GpuSample> = emptyList(),
+    val results: List<FreqPointResult> = emptyList(),
+    val failureMessage: String? = null,
+    val maxGpuTempC: Float? = null,
+    val throttlingRatioPct: Int = 70,
+    /**
+     * The terminal status for which the results dialog was last presented.
+     * The UI uses this together with [resultsDialogDismissed] to decide
+     * whether to re-show the dialog. Both fields live in the ViewModel
+     * state — not in `remember { ... }` slots — so they survive pager
+     * page recycling and config changes (where Composable-level state
+     * would be silently reset to its initial value).
+     */
+    val resultsDialogStatus: StabilityStatus? = null,
+    val resultsDialogDismissed: Boolean = true,
+) {
+    val isRootAvailable: Boolean get() = isRootPinningCapable // back-compat alias
+    val totalPoints: Int get() = activeFrequenciesHz.size
+    val completedPoints: Int get() = results.size
+    val progressRatio: Float
+        get() = if (totalPoints == 0) 0f else completedPoints.toFloat() / totalPoints
+
+    val lastResult: FreqPointResult? get() = results.lastOrNull()
+
+    /** True when the results dialog should currently be on screen. */
+    val showResultsDialog: Boolean
+        get() = !resultsDialogDismissed &&
+            status.isTerminal &&
+            results.isNotEmpty() &&
+            resultsDialogStatus == status
+}
