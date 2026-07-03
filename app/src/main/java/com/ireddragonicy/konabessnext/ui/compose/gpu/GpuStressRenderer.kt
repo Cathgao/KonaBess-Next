@@ -49,6 +49,37 @@ class GpuStressSurfaceView @JvmOverloads constructor(
         preserveEGLContextOnPause = true
     }
 
+    /**
+     * View layout hook (NOT a SurfaceHolder callback). Called by the
+     * platform whenever this View's laid-out size changes — that is, the
+     * real on-screen dimensions of the surface, *before* any
+     * `holder.setFixedSize` shenanigans. We use it to push a smaller buffer
+     * size to the holder so the GL thread renders at the reduced
+     * resolution; the platform then stretches the smaller buffer back to
+     * the View's full size on composite.
+     *
+     * Why `onSizeChanged` and not `surfaceChanged`? `surfaceChanged` fires
+     * every time the underlying Surface is recreated, including after
+     * `setFixedSize` shrinks it — feeding it back to the holder would
+     * cause a feedback loop where the buffer keeps halving. `onSizeChanged`
+     * is tied to the View tree's layout, not the EGL surface, so it's
+     * only called once per actual layout pass.
+     */
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (w <= 0 || h <= 0) return
+        val scaledW = (w * RENDER_SCALE).toInt().coerceAtLeast(1)
+        val scaledH = (h * RENDER_SCALE).toInt().coerceAtLeast(1)
+        // setFixedSize is a hint to the platform; if it equals the
+        // currently-set fixed size the call is a no-op. This is what
+        // gives us idempotency across multiple layout passes.
+        if (scaledW != lastFixedW || scaledH != lastFixedH) {
+            holder.setFixedSize(scaledW, scaledH)
+            lastFixedW = scaledW
+            lastFixedH = scaledH
+        }
+    }
+
     fun setStressActive(active: Boolean) {
         renderMode = if (active) RENDERMODE_CONTINUOUSLY else RENDERMODE_WHEN_DIRTY
         if (!active) requestRender()
@@ -59,6 +90,25 @@ class GpuStressSurfaceView @JvmOverloads constructor(
             callback(code)
             onError?.invoke(code)
         }
+    }
+
+    companion object {
+        /**
+         * Fraction of the View's laid-out size that the GL surface is
+         * actually rendered at. 0.5 means we render into a buffer half the
+         * width and half the height — a quarter of the fragments — and
+         * the platform stretches it back to fill the View. For a
+         * fragment-bound workload like the vsbm ray-march this is by far
+         * the most effective knob for raising frame rate: the shader
+         * itself is unchanged, so the GPU is still being exercised, but
+         * it has one quarter of the per-pixel work to do.
+         */
+        private const val RENDER_SCALE: Float = 0.5f
+
+        // Track the last fixed size we pushed so we don't redundantly call
+        // setFixedSize on every layout pass.
+        private var lastFixedW: Int = 0
+        private var lastFixedH: Int = 0
     }
 }
 
