@@ -240,6 +240,7 @@ class GpuStabilityViewModel @Inject constructor(
                 status = StabilityStatus.Running,
                 results = emptyList(),
                 currentTargetHz = candidates.first(),
+                runCandidateFrequenciesHz = candidates,
                 elapsedSec = 0,
                 currentSamples = emptyList(),
                 failureMessage = null,
@@ -277,6 +278,7 @@ class GpuStabilityViewModel @Inject constructor(
                 status = StabilityStatus.Running,
                 results = emptyList(),
                 currentTargetHz = null,
+                runCandidateFrequenciesHz = emptyList(),
                 elapsedSec = 0,
                 currentSamples = emptyList(),
                 failureMessage = null,
@@ -285,6 +287,7 @@ class GpuStabilityViewModel @Inject constructor(
                 resultsDialogDismissed = true,
             )
         }
+        startElapsedTicker()
         val currentSnapshot = _uiState.value
         sweepJob = viewModelScope.launch {
             try {
@@ -298,6 +301,7 @@ class GpuStabilityViewModel @Inject constructor(
                     it.copy(
                         status = StabilityStatus.Idle,
                         currentTargetHz = null,
+                        runCandidateFrequenciesHz = emptyList(),
                         elapsedSec = 0,
                     )
                 }
@@ -307,6 +311,7 @@ class GpuStabilityViewModel @Inject constructor(
                     it.copy(
                         status = StabilityStatus.Idle,
                         currentTargetHz = null,
+                        runCandidateFrequenciesHz = emptyList(),
                         elapsedSec = 0,
                     )
                 }
@@ -332,6 +337,7 @@ class GpuStabilityViewModel @Inject constructor(
                 currentSamples = emptyList(),
                 elapsedSec = 0,
                 currentTargetHz = null,
+                runCandidateFrequenciesHz = emptyList(),
                 status = StabilityStatus.Idle,
                 maxGpuTempC = null,
                 resultsDialogStatus = null,
@@ -376,7 +382,7 @@ class GpuStabilityViewModel @Inject constructor(
                 val maxTemp: Float? = candidateTemps.maxOrNull()
                 _uiState.update { current ->
                     val nextIndex = current.results.size + 1
-                    val nextTarget = current.activeFrequenciesHz.getOrNull(nextIndex)
+                    val nextTarget = current.runCandidateFrequenciesHz.getOrNull(nextIndex)
                     current.copy(
                         results = current.results + result,
                         currentTargetHz = nextTarget,
@@ -395,6 +401,7 @@ class GpuStabilityViewModel @Inject constructor(
                         status = StabilityStatus.Failed,
                         failureReason = event.reason,
                         currentTargetHz = null,
+                        runCandidateFrequenciesHz = emptyList(),
                         elapsedSec = 0,
                         // Arm the results dialog for this terminal status.
                         // It's only shown when there are results to show — the
@@ -413,6 +420,7 @@ class GpuStabilityViewModel @Inject constructor(
                     it.copy(
                         status = terminal,
                         currentTargetHz = null,
+                        runCandidateFrequenciesHz = emptyList(),
                         elapsedSec = 0,
                         resultsDialogStatus = terminal,
                         resultsDialogDismissed = it.results.isEmpty(),
@@ -430,6 +438,7 @@ class GpuStabilityViewModel @Inject constructor(
                         it.copy(
                             status = StabilityStatus.Idle,
                             currentTargetHz = null,
+                            runCandidateFrequenciesHz = emptyList(),
                             elapsedSec = 0,
                         )
                     }
@@ -437,6 +446,8 @@ class GpuStabilityViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             status = StabilityStatus.Aborted,
+                            currentTargetHz = null,
+                            runCandidateFrequenciesHz = emptyList(),
                             resultsDialogStatus = StabilityStatus.Aborted,
                             resultsDialogDismissed = it.results.isEmpty(),
                         )
@@ -447,13 +458,17 @@ class GpuStabilityViewModel @Inject constructor(
         }
     }
 
-    /** Tick the per-second elapsed counter shown above the GLSurfaceView. Pinning mode only. */
     private fun startElapsedTicker() {
         stopElapsedTicker()
         elapsedJob = viewModelScope.launch {
             while (_uiState.value.status == StabilityStatus.Running) {
                 delay(1_000L)
-                _uiState.update { it.copy(elapsedSec = (it.elapsedSec + 1).coerceAtMost(it.durationPerPointSec)) }
+                _uiState.update { current ->
+                    val pinning = current.mode == GpuTestMode.Pinning
+                    val next = (current.elapsedSec + 1)
+                        .let { if (pinning) it.coerceAtMost(current.durationPerPointSec) else it }
+                    current.copy(elapsedSec = next)
+                }
             }
         }
     }

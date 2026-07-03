@@ -801,6 +801,8 @@
     <string name="stability_clear">Clear Results</string>
     <string name="stability_refresh">Reload</string>
     <string name="stability_running_fmt">Testing %1$d MHz — %2$d / %3$d s</string>
+    <string name="stability_running_busy_fmt">GPU load %1$d%%</string>
+    <string name="stability_running_temp_fmt">Peak %1$.1f°C</string>
     <string name="stability_pass_fmt">PASS — %1$d MHz (%2$d s)</string>
     <string name="stability_fail_fmt">FAIL — %1$d MHz (%2$d s): %3$s</string>
     <string name="stability_idle_hint">Tap "Start Test" to lock and stress each GPU frequency.</string>
@@ -831,7 +833,7 @@
     <string name="stability_freerun_notice_title">Free-run mode (no root)</string>
     <string name="stability_freerun_notice_body">Root mode is off or root isn\'t available, so the GPU won\'t be locked to a specific frequency and there\'s no per-point countdown. The stress test will keep running until you tap Stop.</string>
     <string name="stability_status_freerun_idle">Idle — free-run stress test ready.</string>
-    <string name="stability_freerun_running_fmt">Free stress — %1$d samples collected</string>
+    <string name="stability_freerun_running_fmt">Free stress — %1$d s</string>
 
     <!-- Failure reasons surfaced from the Repository. Keys mirror
          com.ireddragonicy.konabessnext.model.gpu.FailureReason cases. -->

@@ -753,6 +753,8 @@
     <string name="stability_clear">清空结果</string>
     <string name="stability_refresh">刷新</string>
     <string name="stability_running_fmt">正在测试 %1$d MHz — %2$d / %3$d 秒</string>
+    <string name="stability_running_busy_fmt">GPU 占用率 %1$d%%</string>
+    <string name="stability_running_temp_fmt">峰值 %1$.1f°C</string>
     <string name="stability_pass_fmt">通过 — %1$d MHz（%2$d 秒）</string>
     <string name="stability_fail_fmt">未通过 — %1$d MHz（%2$d 秒）：%3$s</string>
     <string name="stability_idle_hint">点击"开始测试"以锁定并压测每个 GPU 频率。</string>
@@ -775,7 +777,7 @@
     <string name="stability_freerun_notice_title">自由运行模式（无需 root）</string>
     <string name="stability_freerun_notice_body">Root 模式已关闭或不可用,因此GPU无法锁定到特定频率,也不会有逐点倒计时。压力测试将持续运行,直到您点击停止。</string>
     <string name="stability_status_freerun_idle">空闲 — 自由运行压力测试已就绪。</string>
-    <string name="stability_freerun_running_fmt">自由压测中 — 已采集 %1$d 个样本</string>
+    <string name="stability_freerun_running_fmt">自由压测中 — %1$d 秒</string>
 
     <!-- Failure reasons surfaced from the Repository. -->
     <string name="stability_failure_aborted_by_user">用户中止了测试</string>

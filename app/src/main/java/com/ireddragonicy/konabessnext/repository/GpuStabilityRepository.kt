@@ -78,6 +78,9 @@ class GpuStabilityRepository @Inject constructor(
             "/sys/class/kgsl/kgsl-3d0/busy",
             "/sys/class/kgsl/kgsl-3d0/gpu_busy",
             "/sys/class/kgsl/kgsl-3d0/devfreq/busy",
+            "/sys/devices/platform/soc/soc:qcom,kgsl-3d0/devfreq/busy",
+            "/sys/devices/platform/soc/*.qcom,kgsl-3d0/devfreq/busy",
+            "/sys/class/devfreq/*/busy",
         )
         val TEMP_FALLBACK_PATH = "/sys/class/kgsl/kgsl-3d0/temp"
         val THERMAL_ZONE_CMDS: List<String> = listOf(
@@ -233,10 +236,6 @@ class GpuStabilityRepository @Inject constructor(
         originalLimits = null
         _running.value = true
         try {
-            // In freerun mode there's no fixed target — pass 0 so readSample
-            // doesn't compute a (meaningless) throttle ratio. The downstream UI
-            // is expected to ignore `targetFreqHz` in this mode anyway.
-            val target = 0L
             while (_running.value) {
                 val renderErr = lastSeenRenderError
                 if (renderErr != null && renderErr != 0) {
@@ -245,8 +244,6 @@ class GpuStabilityRepository @Inject constructor(
                     ))
                     break
                 }
-                val sample = readSample(target)
-                publish(TestEvent.SampleCollected(sample))
                 delay(1_000L)
             }
             if (_running.value) {
@@ -398,7 +395,13 @@ class GpuStabilityRepository @Inject constructor(
         val tempCmd = resolvedTempCommand ?: pickTemperatureCommand()?.also { resolvedTempCommand = it }
         val sb = StringBuilder()
         sb.append("cat '").append(curFreqPath ?: "/dev/null").append("' 2>/dev/null; ")
-        sb.append("cat '").append(busyPath ?: "/dev/null").append("' 2>/dev/null; ")
+        if (busyPath != null) {
+            sb.append("cat '").append(busyPath).append("' 2>/dev/null; ")
+        } else {
+            // busy path unknown → emit a placeholder so the row index of
+            // the temperature sample below stays stable across reads.
+            sb.append("echo 0; ")
+        }
         if (tempPath != null) {
             sb.append("cat '").append(tempPath).append("' 2>/dev/null; ")
         } else if (tempCmd != null) {
@@ -407,7 +410,7 @@ class GpuStabilityRepository @Inject constructor(
         val raw = shellExecutor.execForOutput(sb.toString())
 
         val curFreq = raw.getOrNull(0)?.trim()?.toLongOrNull()?.takeIf { it > 0L } ?: 0L
-        val busy = raw.getOrNull(1)?.trim()?.toIntOrNull()?.coerceIn(0, 100)
+        val busy = parsePercentInt(raw.getOrNull(1)?.trim())
         val tempRaw = raw.getOrNull(2)?.trim()?.toLongOrNull()
         val temp = if (tempRaw != null && tempRaw > 0L) {
             if (tempRaw > 1000L) tempRaw / 1000f else tempRaw.toFloat()
@@ -426,11 +429,13 @@ class GpuStabilityRepository @Inject constructor(
 
     private suspend fun resolveFirstWorkingPath(paths: List<String>, asLong: Boolean): String? {
         for (path in paths) {
-            val raw = shellExecutor.execForOutput("cat '$path' 2>/dev/null").firstOrNull()?.trim()
+            val cmd = if (path.contains('*'))
+                "cat $path 2>/dev/null" else "cat '$path' 2>/dev/null"
+            val raw = shellExecutor.execForOutput(cmd).firstOrNull()?.trim()
             if (asLong) {
                 if (raw?.toLongOrNull()?.let { it > 0L } == true) return path
             } else {
-                if (raw?.toIntOrNull()?.let { it in 0..100 } == true) return path
+                if (parsePercentInt(raw)?.let { it in 0..100 } == true) return path
             }
         }
         return null
@@ -506,4 +511,24 @@ class GpuStabilityRepository @Inject constructor(
         data object AllCompleted : TestEvent()
         data object Aborted : TestEvent()
     }
+}
+
+/**
+ * Parse an integer in the 0..100 range from a sysfs line, tolerating
+ * vendor-specific decoration. Examples that all parse to 99:
+ *  - "99"
+ *  - "99 %"
+ *  - " 99%"
+ *  - "99%"
+ *  - "99.5"  (decimal point stripped, integer part used)
+ *  - "99.5%" (decimal + percent sign)
+ * Returns null for any input that doesn't contain a leading 0..100 integer.
+ */
+internal fun parsePercentInt(raw: String?): Int? {
+    if (raw.isNullOrBlank()) return null
+    val firstToken = raw.trim().split(Regex("\\s+")).firstOrNull() ?: return null
+    val digits = firstToken.trimEnd('%').trim()
+    // Strip a trailing decimal fraction so "99.5" / "99.5%" map to 99.
+    val intPart = digits.substringBefore('.')
+    return intPart.toIntOrNull()?.takeIf { it in 0..100 }
 }

@@ -80,36 +80,12 @@ fun GpuStabilityScreen(
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-
-    // The frequency picker dialog is local UI state — not ViewModel state,
-    // because the dialog only makes sense while we're standing on this
-    // screen. (Resetting it when the user navigates away to the Settings
-    // tab and back is the desired behaviour; we don't want a stale dialog
-    // popping up unprompted.)
     var showFreqPicker by remember { mutableStateOf(false) }
-
-    // The VM subscribes to SettingsRepository.rootModeFlow() in its init block,
-// so toggling Root Mode in the Settings tab automatically triggers a
-// capability re-evaluation in the VM. No UI-side listener is needed: the
-// pager keeps this Composable in the composition tree at all times, and
-// lifecycle events therefore don't fire on tab switches.
-
-    // The GLSurfaceView is created **only** while a sweep is actually running
-    // (or has just finished). Creating it up-front would force the GL
-    // thread to compile and link the vsbm shader on every screen entry,
-    // which is what was causing the visible stall when the user opened the
-    // Stability tab without intending to start a test.
-    val surfaceView = if (state.status == StabilityStatus.Running ||
-        state.status == StabilityStatus.Completed ||
-        state.status == StabilityStatus.Failed ||
-        state.status == StabilityStatus.Aborted
-    ) {
-        remember {
-            GpuStressSurfaceView(context).apply {
-                bindErrorCallback { code -> viewModel.onRenderError(code) }
-            }
+    val surfaceView = remember {
+        GpuStressSurfaceView(context).apply {
+            bindErrorCallback { code -> viewModel.onRenderError(code) }
         }
-    } else null
+    }
 
     DisposableEffect(lifecycleOwner, surfaceView) {
         if (surfaceView == null) {
@@ -189,7 +165,14 @@ fun GpuStabilityScreen(
                     )
                 }
             }
-            item { ChartCard(state = state) }
+            // The chart reads cur_freq and GPU temperature from sysfs, which
+            // requires a working root shell. Hide the chart when no root is
+            // available — the UI state flags both "root toggle off" and "app
+            // has no root" as !isRootPinningCapable (see
+            // GpuStabilityViewModel.refreshPinningCapabilityInternal).
+            if (state.isRootPinningCapable) {
+                item { ChartCard(state = state) }
+            }
             // Results list only makes sense in pinning mode.
             if (state.mode == com.ireddragonicy.konabessnext.model.gpu.GpuTestMode.Pinning &&
                 state.results.isNotEmpty()
@@ -302,6 +285,25 @@ private fun HeaderCard(state: GpuStabilityUiState, onRefresh: () -> Unit, modifi
                     ),
                     style = MaterialTheme.typography.bodySmall,
                 )
+                val latestBusy = state.currentSamples.lastOrNull()?.gpuBusyPct
+                val peakTemp = state.maxGpuTempC
+                if (latestBusy != null || peakTemp != null) {
+                    Spacer(Modifier.size(2.dp))
+                    Text(
+                        text = buildString {
+                            if (latestBusy != null) {
+                                append(stringResource(R.string.stability_running_busy_fmt, latestBusy))
+                            }
+                            if (latestBusy != null && peakTemp != null) {
+                                append("  •  ")
+                            }
+                            if (peakTemp != null) {
+                                append(stringResource(R.string.stability_running_temp_fmt, peakTemp))
+                            }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
             }
         }
     }
@@ -321,7 +323,7 @@ private fun headerStatusLine(state: GpuStabilityUiState): String {
             if (state.mode == com.ireddragonicy.konabessnext.model.gpu.GpuTestMode.Freerun) {
                 // In freerun mode we don't lock to a specific MHz, just count
                 // the samples we've collected.
-                stringResource(R.string.stability_freerun_running_fmt, state.currentSamples.size)
+                stringResource(R.string.stability_freerun_running_fmt, state.elapsedSec)
             } else {
                 val cur = state.currentTargetHz?.let { "${it / 1_000_000} MHz" } ?: ""
                 "$cur — ${state.completedPoints}/${state.totalPoints}"

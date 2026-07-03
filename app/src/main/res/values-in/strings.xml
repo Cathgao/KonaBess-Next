@@ -750,6 +750,8 @@
     <string name="stability_clear">Clear Results</string>
     <string name="stability_refresh">Reload</string>
     <string name="stability_running_fmt">Testing %1$d MHz — %2$d / %3$d s</string>
+    <string name="stability_running_busy_fmt">Beban GPU %1$d%%</string>
+    <string name="stability_running_temp_fmt">Puncak %1$.1f°C</string>
     <string name="stability_pass_fmt">PASS — %1$d MHz (%2$d s)</string>
     <string name="stability_fail_fmt">FAIL — %1$d MHz (%2$d s): %3$s</string>
     <string name="stability_idle_hint">Tap "Start Test" to lock and stress each GPU frequency.</string>

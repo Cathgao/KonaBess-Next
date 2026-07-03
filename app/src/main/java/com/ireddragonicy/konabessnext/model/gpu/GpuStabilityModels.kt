@@ -97,6 +97,7 @@ data class GpuStabilityUiState(
     val mode: GpuTestMode = GpuTestMode.Freerun,
     val isRootPinningCapable: Boolean = false,
     val activeFrequenciesHz: List<Long> = emptyList(),
+    val runCandidateFrequenciesHz: List<Long> = emptyList(),
     /**
      * Subset of [activeFrequenciesHz] the user has chosen to actually test.
      * Empty set means "follow [activeFrequenciesHz] verbatim" (this is the
